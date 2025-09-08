@@ -6,15 +6,15 @@ import { hexToOklch, getContrastColor } from '@/lib/theme-utils'
 interface ThemeConfig {
     colors: {
         primary: string
-        // Add more colors as needed
     }
     radius: string
 }
 
 interface ThemeContextType {
     isDark: boolean
-    toggleTheme: () => void
     config: ThemeConfig
+    toggleTheme: () => void
+    updateConfig: (newConfig: ThemeConfig) => void
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
@@ -26,30 +26,36 @@ interface ThemeProviderProps {
 
 export function ThemeProvider({ children, config }: ThemeProviderProps) {
     const [isDark, setIsDark] = useState(false)
+    const [currentConfig, setCurrentConfig] = useState(config)
+
+    useEffect(() => {
+        // Update current config when prop changes
+        setCurrentConfig(config)
+    }, [config])
 
     useEffect(() => {
         // Check if user has a preference stored
-        const stored = localStorage.getItem('theme')
+        const stored = localStorage.getItem('theme-mode')
         const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
 
         const shouldBeDark = stored === 'dark' || (!stored && prefersDark)
         setIsDark(shouldBeDark)
 
         // Apply theme immediately
-        applyTheme(shouldBeDark, config)
+        applyTheme(shouldBeDark, currentConfig)
 
         // Listen for system theme changes
         const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
         const handleChange = (e: MediaQueryListEvent) => {
-            if (!localStorage.getItem('theme')) {
+            if (!localStorage.getItem('theme-mode')) {
                 setIsDark(e.matches)
-                applyTheme(e.matches, config)
+                applyTheme(e.matches, currentConfig)
             }
         }
 
         mediaQuery.addEventListener('change', handleChange)
         return () => mediaQuery.removeEventListener('change', handleChange)
-    }, [config])
+    }, [currentConfig])
 
     const applyTheme = (dark: boolean, themeConfig: ThemeConfig) => {
         const root = document.documentElement
@@ -72,12 +78,22 @@ export function ThemeProvider({ children, config }: ThemeProviderProps) {
     const toggleTheme = () => {
         const newTheme = !isDark
         setIsDark(newTheme)
-        applyTheme(newTheme, config)
-        localStorage.setItem('theme', newTheme ? 'dark' : 'light')
+        applyTheme(newTheme, currentConfig)
+        localStorage.setItem('theme-mode', newTheme ? 'dark' : 'light')
+    }
+
+    const updateConfig = (newConfig: ThemeConfig) => {
+        setCurrentConfig(newConfig)
+        applyTheme(isDark, newConfig)
     }
 
     return (
-        <ThemeContext.Provider value={{ isDark, toggleTheme, config }}>
+        <ThemeContext.Provider value={{
+            isDark,
+            config: currentConfig,
+            toggleTheme,
+            updateConfig
+        }}>
             {children}
         </ThemeContext.Provider>
     )
