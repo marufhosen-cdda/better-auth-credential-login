@@ -25,9 +25,9 @@ const nextConfig = {
   },
 
   // Additional recommended settings for auth apps
-  experimental: {
-    serverComponentsExternalPackages: ["@prisma/client", "bcryptjs"],
-  },
+  // experimental: {
+  //   serverComponentsExternalPackages: ["@prisma/client", "bcryptjs"],
+  // },
 
   // Headers for security (optional but recommended)
   async headers() {

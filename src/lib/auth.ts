@@ -14,12 +14,6 @@ export const auth = betterAuth({
             console.log(`Password reset for ${user.email}: ${url}`);
         },
     },
-    socialProviders: {
-        google: {
-            clientId: process.env.GOOGLE_CLIENT_ID!,
-            clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-        },
-    },
     baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
     trustedOrigins: [
         process.env.BETTER_AUTH_URL || "http://localhost:3000",
@@ -29,9 +23,6 @@ export const auth = betterAuth({
     session: {
         expiresIn: 60 * 60 * 24 * 7, // 7 days
         updateAge: 60 * 60 * 24, // 1 day
-    },
-    advanced: {
-        generateId: () => crypto.randomUUID(), // Use crypto.randomUUID for better compatibility
     },
 });
 
