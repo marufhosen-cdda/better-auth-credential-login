@@ -600,7 +600,7 @@
 //     );
 // }
 
-// app/video-meeting/VideoSDKComponents.tsx (Fixed Media Issues)
+// app/video-meeting/VideoSDKComponents.tsx (CRITICAL SCREEN SHARE FIX)
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useCallback, JSX } from "react";
@@ -643,46 +643,54 @@ interface MeetingConfig {
     name: string;
 }
 
-// Media Error Recovery Component
-function MediaErrorHandler({ onRetry }: { onRetry: () => void }): JSX.Element {
-    return (
-        <div className="absolute inset-0 bg-red-900/20 flex items-center justify-center">
-            <div className="bg-white/90 backdrop-blur-sm rounded-lg p-4 text-center max-w-sm mx-4">
-                <AlertTriangle className="w-8 h-8 text-red-600 mx-auto mb-2" />
-                <h3 className="font-semibold text-gray-900 mb-1">Media Error</h3>
-                <p className="text-sm text-gray-600 mb-3">
-                    Camera might be in use by another app. Please close other video apps and try again.
-                </p>
-                <Button onClick={onRetry} size="sm" className="flex items-center gap-2">
-                    <RefreshCw className="w-4 h-4" />
-                    Retry
-                </Button>
-            </div>
-        </div>
-    );
-}
-
-// Enhanced Screen Share View Component with better error handling
+// FIXED: Enhanced Screen Share View Component 
 function ScreenShareView({ participantId }: { participantId: string }): JSX.Element {
     const { screenShareStream, displayName, screenShareOn } = useParticipant(participantId);
     const [hasError, setHasError] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+    const videoRef = useRef<HTMLVideoElement>(null);
+
+    console.log("ScreenShareView - participantId:", participantId);
+    console.log("ScreenShareView - screenShareOn:", screenShareOn);
+    console.log("ScreenShareView - screenShareStream:", screenShareStream);
 
     useEffect(() => {
-        if (screenShareStream) {
-            setIsLoading(false);
-            setHasError(false);
-        } else if (screenShareOn) {
-            // Screen share is on but no stream - likely an error
-            const timer = setTimeout(() => {
+        let timeoutId: NodeJS.Timeout;
+
+        if (screenShareOn) {
+            if (screenShareStream && screenShareStream.track) {
+                console.log("Screen share stream available:", screenShareStream);
                 setIsLoading(false);
-                setHasError(true);
-            }, 3000);
-            return () => clearTimeout(timer);
+                setHasError(false);
+
+                // CRITICAL FIX: Manually handle video element for screen share
+                if (videoRef.current) {
+                    const mediaStream = new MediaStream([screenShareStream.track]);
+                    videoRef.current.srcObject = mediaStream;
+                    videoRef.current.play().catch((error) => {
+                        console.error("Failed to play screen share video:", error);
+                        setHasError(true);
+                    });
+                }
+            } else {
+                // Wait for stream but set timeout
+                timeoutId = setTimeout(() => {
+                    console.log("Screen share timeout - no stream received");
+                    setIsLoading(false);
+                    setHasError(true);
+                }, 5000);
+            }
         }
+
+        return () => {
+            if (timeoutId) clearTimeout(timeoutId);
+        };
     }, [screenShareStream, screenShareOn]);
 
-    if (!screenShareOn) return <></>;
+    if (!screenShareOn) {
+        console.log("Screen share not active for participant:", participantId);
+        return <></>;
+    }
 
     if (isLoading) {
         return (
@@ -690,7 +698,7 @@ function ScreenShareView({ participantId }: { participantId: string }): JSX.Elem
                 <CardContent className="p-0 aspect-video relative flex items-center justify-center">
                     <div className="text-center text-white">
                         <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
-                        <p>Loading screen share...</p>
+                        <p>Loading {displayName}'s screen share...</p>
                     </div>
                 </CardContent>
             </Card>
@@ -705,6 +713,7 @@ function ScreenShareView({ participantId }: { participantId: string }): JSX.Elem
                         <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
                         <h3 className="text-lg font-semibold mb-2">Screen Share Error</h3>
                         <p className="text-sm opacity-75">Unable to display {displayName}'s screen</p>
+                        <p className="text-xs opacity-60 mt-2">Stream: {screenShareStream ? 'Available' : 'Not Available'}</p>
                     </div>
                 </CardContent>
             </Card>
@@ -714,30 +723,70 @@ function ScreenShareView({ participantId }: { participantId: string }): JSX.Elem
     return (
         <Card className="relative overflow-hidden bg-gray-900 border-2 border-blue-500 shadow-xl">
             <CardContent className="p-0 aspect-video relative">
-                <VideoPlayer
-                    participantId={participantId}
-                    track={screenShareStream}
-                    containerStyle={{
-                        height: "100%",
-                        width: "100%",
-                    }}
-                    className="w-full h-full object-contain bg-black"
-                    onError={() => setHasError(true)}
-                />
+                {/* CRITICAL FIX: Try both VideoPlayer and manual video element */}
+                {screenShareStream && screenShareStream.track ? (
+                    <>
+                        {/* Method 1: VideoSDK VideoPlayer */}
+                        <VideoPlayer
+                            participantId={participantId}
+                            containerStyle={{
+                                height: "100%",
+                                width: "100%",
+                            }}
+                            className="w-full h-full object-contain bg-black"
+                            onError={(error: any) => {
+                                console.error("VideoPlayer error:", error);
+                                setHasError(true);
+                            }}
+                        />
+
+                        {/* Method 2: Manual video element as fallback */}
+                        <video
+                            ref={videoRef}
+                            className="w-full h-full object-contain bg-black absolute inset-0"
+                            autoPlay
+                            playsInline
+                            muted
+                            style={{ zIndex: hasError ? 10 : 1 }}
+                            onError={(e) => {
+                                console.error("Manual video error:", e);
+                                setHasError(true);
+                            }}
+                            onLoadedData={() => {
+                                console.log("Manual video loaded successfully");
+                                setHasError(false);
+                            }}
+                        />
+                    </>
+                ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-gray-800">
+                        <div className="text-center text-white">
+                            <Monitor className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                            <p>Waiting for screen share...</p>
+                        </div>
+                    </div>
+                )}
 
                 {/* Screen share overlay */}
-                <div className="absolute top-3 left-3">
+                <div className="absolute top-3 left-3 z-20">
                     <Badge className="bg-blue-600 text-white flex items-center gap-2">
                         <Monitor className="w-3 h-3" />
                         {displayName} is sharing screen
                     </Badge>
+                </div>
+
+                {/* Debug info (remove in production) */}
+                <div className="absolute bottom-3 right-3 z-20 bg-black/70 text-white text-xs p-2 rounded">
+                    <div>Stream: {screenShareStream ? '✓' : '✗'}</div>
+                    <div>Track: {screenShareStream?.track ? '✓' : '✗'}</div>
+                    <div>Active: {screenShareOn ? '✓' : '✗'}</div>
                 </div>
             </CardContent>
         </Card>
     );
 }
 
-// Enhanced Participant View Component with better media handling
+// Enhanced Participant View Component
 function ParticipantView({ participantId, isPresenting = false }: ParticipantViewProps): JSX.Element {
     const micRef = useRef<HTMLAudioElement>(null);
     const [mediaError, setMediaError] = useState(false);
@@ -756,7 +805,7 @@ function ParticipantView({ participantId, isPresenting = false }: ParticipantVie
         enableWebcam
     } = useParticipant(participantId);
 
-    // Enhanced audio handling with error recovery
+    // Enhanced audio handling
     useEffect(() => {
         if (micRef.current) {
             if (micOn && micStream) {
@@ -765,7 +814,6 @@ function ParticipantView({ participantId, isPresenting = false }: ParticipantVie
                     mediaStream.addTrack(micStream.track);
                     micRef.current.srcObject = mediaStream;
 
-                    // Add error handling for audio playback
                     micRef.current.play()
                         .then(() => {
                             setAudioError(false);
@@ -773,21 +821,6 @@ function ParticipantView({ participantId, isPresenting = false }: ParticipantVie
                         .catch((error: Error) => {
                             console.error("Audio play failed:", error);
                             setAudioError(true);
-
-                            // Try to recover by removing and re-adding the audio element
-                            if (micRef.current) {
-                                micRef.current.srcObject = null;
-                                setTimeout(() => {
-                                    if (micRef.current && micStream) {
-                                        const newMediaStream = new MediaStream();
-                                        newMediaStream.addTrack(micStream.track);
-                                        micRef.current.srcObject = newMediaStream;
-                                        micRef.current.play().catch(() => {
-                                            // Silent fail after retry
-                                        });
-                                    }
-                                }, 1000);
-                            }
                         });
                 } catch (error) {
                     console.error("Failed to set up audio stream:", error);
@@ -800,7 +833,6 @@ function ParticipantView({ participantId, isPresenting = false }: ParticipantVie
         }
     }, [micStream, micOn]);
 
-    // Handle media errors and provide recovery
     const handleMediaRetry = useCallback(async () => {
         setMediaError(false);
         try {
@@ -814,35 +846,24 @@ function ParticipantView({ participantId, isPresenting = false }: ParticipantVie
             }
         } catch (error) {
             console.error("Failed to retry media:", error);
-            toast.error("Failed to access camera/microphone. Please check permissions and close other video apps.");
+            toast.error("Failed to access camera/microphone. Please check permissions.");
         }
     }, [isLocal, webcamOn, micOn, enableWebcam, enableMic]);
-
-    // Don't render participant video if they're screen sharing (main screen share view will handle it)
-    if (screenShareOn && !isPresenting) {
-        return <></>;
-    }
 
     return (
         <Card className={`relative overflow-hidden bg-gray-900 border-0 shadow-lg ${isPresenting ? 'order-first col-span-full lg:col-span-2 xl:col-span-3' : ''
             }`}>
             <CardContent className="p-0 aspect-video relative">
                 {webcamOn && webcamStream ? (
-                    <>
-                        <VideoPlayer
-                            participantId={participantId}
-                            track={webcamStream}
-                            containerStyle={{
-                                height: "100%",
-                                width: "100%",
-                            }}
-                            className="w-full h-full object-cover"
-                            onError={() => setMediaError(true)}
-                        />
-                        {mediaError && isLocal && (
-                            <MediaErrorHandler onRetry={handleMediaRetry} />
-                        )}
-                    </>
+                    <VideoPlayer
+                        participantId={participantId}
+                        containerStyle={{
+                            height: "100%",
+                            width: "100%",
+                        }}
+                        className="w-full h-full object-cover"
+                        onError={() => setMediaError(true)}
+                    />
                 ) : (
                     <div className="w-full h-full bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center">
                         <div className="text-center">
@@ -868,7 +889,7 @@ function ParticipantView({ participantId, isPresenting = false }: ParticipantVie
                 )}
 
                 {/* Participant info overlay */}
-                <div className="absolute bottom-3 left-3 flex items-center gap-2">
+                <div className="absolute bottom-3 left-3 flex items-center gap-2 z-10">
                     <Badge
                         variant={isLocal ? "default" : "secondary"}
                         className={`text-xs ${isLocal ? 'bg-blue-600' : 'bg-black/50 text-white border-white/20'}`}
@@ -910,7 +931,7 @@ function ParticipantView({ participantId, isPresenting = false }: ParticipantVie
     );
 }
 
-// Enhanced Controls Component with better error handling
+// Enhanced Controls Component
 function Controls(): JSX.Element {
     const {
         leave,
@@ -934,7 +955,6 @@ function Controls(): JSX.Element {
         screen: false
     });
 
-    // Check if someone else is already screen sharing
     const otherScreenShareActive = useMemo(() => {
         return [...participants.values()].some(
             (participant: any) => participant.screenShareOn && !participant.isLocal
@@ -950,7 +970,7 @@ function Controls(): JSX.Element {
             toast.success(localMicOn ? "Microphone muted" : "Microphone unmuted");
         } catch (error) {
             console.error("Failed to toggle microphone:", error);
-            toast.error("Failed to toggle microphone. Please check if another app is using your microphone.");
+            toast.error("Failed to toggle microphone.");
         } finally {
             setIsToggling(prev => ({ ...prev, mic: false }));
         }
@@ -965,7 +985,7 @@ function Controls(): JSX.Element {
             toast.success(localWebcamOn ? "Camera turned off" : "Camera turned on");
         } catch (error) {
             console.error("Failed to toggle camera:", error);
-            toast.error("Failed to toggle camera. Please check if another app is using your camera and close it.");
+            toast.error("Failed to toggle camera.");
         } finally {
             setIsToggling(prev => ({ ...prev, webcam: false }));
         }
@@ -974,27 +994,8 @@ function Controls(): JSX.Element {
     const handleScreenShare = useCallback(async (): Promise<void> => {
         if (isToggling.screen) return;
 
-        // Enhanced HTTPS check for localhost
-        if (typeof window !== 'undefined') {
-            const isSecure = window.location.protocol === 'https:' ||
-                window.location.hostname === 'localhost' ||
-                window.location.hostname === '127.0.0.1';
-
-            if (!isSecure) {
-                toast.error("Screen sharing requires HTTPS. Please use https://localhost or deploy to a secure domain.");
-                return;
-            }
-        }
-
-        // Check browser compatibility
-        if (typeof window !== 'undefined' && !navigator.mediaDevices?.getDisplayMedia) {
-            toast.error("Screen sharing is not supported in this browser. Please use Chrome, Firefox, or Safari.");
-            return;
-        }
-
-        // Check if someone else is already sharing
         if (!localScreenShareOn && otherScreenShareActive) {
-            toast.error("Someone else is already sharing their screen. Please wait for them to stop sharing.");
+            toast.error("Someone else is already sharing their screen.");
             return;
         }
 
@@ -1004,26 +1005,12 @@ function Controls(): JSX.Element {
                 await disableScreenShare();
                 toast.info("Screen sharing stopped");
             } else {
-                // Enhanced screen share with better options
                 await enableScreenShare();
-                toast.success("Screen sharing started successfully");
+                toast.success("Screen sharing started");
             }
         } catch (error) {
             console.error("Failed to toggle screen share:", error);
-
-            if (error instanceof Error) {
-                if (error.message.includes('Permission denied') || error.message.includes('NotAllowedError')) {
-                    toast.error("Screen sharing permission denied. Please allow screen sharing when prompted by your browser.");
-                } else if (error.message.includes('NotSupportedError')) {
-                    toast.error("Screen sharing is not supported in this browser or system.");
-                } else if (error.message.includes('InvalidStateError')) {
-                    toast.error("Screen sharing failed. Please try again or restart your browser.");
-                } else {
-                    toast.error("Failed to start screen sharing. Please ensure you're using HTTPS and try again.");
-                }
-            } else {
-                toast.error("Screen sharing failed. Please try again.");
-            }
+            toast.error("Failed to toggle screen sharing.");
         } finally {
             setIsToggling(prev => ({ ...prev, screen: false }));
         }
@@ -1031,13 +1018,9 @@ function Controls(): JSX.Element {
 
     const handleLeave = useCallback((): void => {
         if (window.confirm("Are you sure you want to leave the meeting?")) {
-            // Stop all media streams before leaving
-            if (localScreenShareOn) {
-                disableScreenShare().catch(console.error);
-            }
             leave();
         }
-    }, [leave, localScreenShareOn, disableScreenShare]);
+    }, [leave]);
 
     return (
         <div className="bg-white/90 backdrop-blur-sm border-t border-gray-200 p-4">
@@ -1048,7 +1031,6 @@ function Controls(): JSX.Element {
                     size="icon"
                     className="rounded-full w-12 h-12 transition-all hover:scale-105"
                     disabled={isToggling.mic}
-                    title={localMicOn ? "Mute microphone" : "Unmute microphone"}
                 >
                     {isToggling.mic ? (
                         <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
@@ -1065,7 +1047,6 @@ function Controls(): JSX.Element {
                     size="icon"
                     className="rounded-full w-12 h-12 transition-all hover:scale-105"
                     disabled={isToggling.webcam}
-                    title={localWebcamOn ? "Turn off camera" : "Turn on camera"}
                 >
                     {isToggling.webcam ? (
                         <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
@@ -1082,13 +1063,6 @@ function Controls(): JSX.Element {
                     size="icon"
                     className="rounded-full w-12 h-12 transition-all hover:scale-105"
                     disabled={isToggling.screen || (!localScreenShareOn && otherScreenShareActive)}
-                    title={
-                        otherScreenShareActive && !localScreenShareOn
-                            ? "Someone else is sharing their screen"
-                            : localScreenShareOn
-                                ? "Stop screen sharing"
-                                : "Start screen sharing"
-                    }
                 >
                     {isToggling.screen ? (
                         <div className="animate-spin rounded-full h-5 w-5 border-2 border-current border-t-transparent" />
@@ -1104,13 +1078,12 @@ function Controls(): JSX.Element {
                     variant="destructive"
                     size="icon"
                     className="rounded-full w-12 h-12 transition-all hover:scale-105"
-                    title="Leave meeting"
                 >
                     <PhoneOff className="w-5 h-5" />
                 </Button>
             </div>
 
-            {/* Enhanced status indicators */}
+            {/* Status indicators */}
             <div className="flex justify-center mt-2 gap-2 text-xs text-gray-600">
                 {localScreenShareOn && (
                     <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
@@ -1129,10 +1102,7 @@ function Controls(): JSX.Element {
     );
 }
 
-// Rest of the components remain the same but with better error handling...
-// [MeetingView and main component remain the same as previous version]
-
-// Enhanced Meeting View Component
+// CRITICAL FIX: Enhanced Meeting View with better screen share detection
 function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps): JSX.Element {
     const [joined, setJoined] = useState<string | null>(null);
     const [participantCount, setParticipantCount] = useState<number>(0);
@@ -1147,22 +1117,26 @@ function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps):
             toast.info("Left the meeting");
         },
         onParticipantJoined: (participant: any) => {
+            console.log("Participant joined:", participant);
             toast.success(`${participant.displayName} joined the meeting`);
             setParticipantCount(prev => prev + 1);
         },
         onParticipantLeft: (participant: any) => {
+            console.log("Participant left:", participant);
             toast.info(`${participant.displayName} left the meeting`);
             setParticipantCount(prev => Math.max(0, prev - 1));
         },
         onScreenShareStarted: () => {
+            console.log("Screen sharing started event");
             toast.info("Screen sharing started");
         },
         onScreenShareStopped: () => {
+            console.log("Screen sharing stopped event");
             toast.info("Screen sharing stopped");
         },
         onError: (error: any) => {
             console.error("Meeting error:", error);
-            toast.error("Meeting error occurred. Please try refreshing the page.");
+            toast.error("Meeting error occurred.");
         },
     });
 
@@ -1179,15 +1153,20 @@ function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps):
     const participantIds = useMemo<string[]>(() => {
         const ids = [...participants.keys()];
         setParticipantCount(ids.length);
+        console.log("Current participants:", ids);
         return ids;
     }, [participants]);
 
-    // Find participants who are screen sharing
+    // CRITICAL FIX: Better screen sharing detection
     const screenSharingParticipants = useMemo(() => {
-        return participantIds.filter(id => {
+        const sharingParticipants = participantIds.filter(id => {
             const participant = participants.get(id);
-            return participant?.screenShareOn;
+            const isSharing = participant?.screenShareOn;
+            console.log(`Participant ${id} (${participant?.displayName}) - screenShareOn:`, isSharing);
+            return isSharing;
         });
+        console.log("Screen sharing participants:", sharingParticipants);
+        return sharingParticipants;
     }, [participantIds, participants]);
 
     if (joined === "JOINED") {
@@ -1211,7 +1190,7 @@ function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps):
                                 {screenSharingParticipants.length > 0 && (
                                     <Badge variant="outline" className="flex items-center gap-2 bg-blue-50 text-blue-700 border-blue-200">
                                         <Monitor className="w-4 h-4" />
-                                        Screen sharing active
+                                        Screen sharing active ({screenSharingParticipants.length})
                                     </Badge>
                                 )}
                             </div>
@@ -1231,13 +1210,16 @@ function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps):
                 {/* Video Grid */}
                 <div className="flex-1 p-6 overflow-auto">
                     {screenSharingParticipants.length > 0 ? (
-                        /* Screen sharing layout */
+                        /* CRITICAL FIX: Screen sharing layout */
                         <div className="h-full flex flex-col gap-4">
-                            {/* Screen share view */}
-                            <div className="flex-1">
-                                {screenSharingParticipants.map((participantId: string) => (
-                                    <ScreenShareView key={`screen-${participantId}`} participantId={participantId} />
-                                ))}
+                            {/* Screen share view - ALWAYS show when someone is sharing */}
+                            <div className="flex-1 min-h-[400px]">
+                                {screenSharingParticipants.map((participantId: string) => {
+                                    console.log("Rendering ScreenShareView for:", participantId);
+                                    return (
+                                        <ScreenShareView key={`screen-${participantId}`} participantId={participantId} />
+                                    );
+                                })}
                             </div>
 
                             {/* Participant thumbnails */}
@@ -1331,8 +1313,8 @@ export default function VideoSDKComponents({
 }: VideoSDKComponentsProps): JSX.Element {
     const meetingConfig: MeetingConfig = {
         meetingId,
-        micEnabled: false, // Start with mic off to avoid conflicts
-        webcamEnabled: false, // Start with camera off to avoid conflicts
+        micEnabled: false,
+        webcamEnabled: false,
         name: userName,
     };
 
