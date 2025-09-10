@@ -48,6 +48,7 @@ declare module '@videosdk.live/react-sdk' {
         participants: Map<string, Participant>;
         join: () => void;
         leave: () => void;
+        toggleScreenShare: () => Promise<void>;
         toggleMic: () => Promise<void>;
         toggleWebcam: () => Promise<void>;
         enableScreenShare: () => Promise<void>;
@@ -59,6 +60,7 @@ declare module '@videosdk.live/react-sdk' {
         startRecording: (config?: any) => void;
         stopRecording: () => void;
         sendChatMessage: (message: string) => void;
+        presenterId?: string;
     }
 
     // Meeting hook options
@@ -99,6 +101,7 @@ declare module '@videosdk.live/react-sdk' {
         disableMic: () => void;
         enableWebcam: () => void;
         disableWebcam: () => void;
+        screenShareAudioStream?: MediaStream;
         pin: () => void;
         unpin: () => void;
         setQuality: (quality: string) => void;

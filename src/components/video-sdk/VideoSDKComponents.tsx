@@ -601,6 +601,7 @@
 // }
 
 // app/video-meeting/VideoSDKComponents.tsx (EMERGENCY SCREEN SHARE FIX)
+// app/video-meeting/VideoSDKComponents.tsx (PROPER SCREEN SHARE IMPLEMENTATION)
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useCallback, JSX } from "react";
@@ -614,7 +615,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Mic, MicOff, Video, VideoOff, Phone, PhoneOff, Monitor, MonitorOff, Copy, Users, AlertTriangle, RefreshCw } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, Phone, PhoneOff, Monitor, MonitorOff, Copy, Users, Settings2, Maximize2 } from "lucide-react";
 import { toast } from "sonner";
 
 // Types
@@ -627,7 +628,10 @@ interface VideoSDKComponentsProps {
 
 interface ParticipantViewProps {
     participantId: string;
-    isPresenting?: boolean;
+}
+
+interface PresenterViewProps {
+    presenterId: string;
 }
 
 interface MeetingViewProps {
@@ -643,91 +647,89 @@ interface MeetingConfig {
     name: string;
 }
 
-// EMERGENCY SCREEN SHARE COMPONENT - Forces display regardless of VideoSDK state
-function ForceScreenShareView({ participantId }: { participantId: string }): JSX.Element {
-    const { screenShareStream, displayName, screenShareOn } = useParticipant(participantId);
-    const videoRef = useRef<HTMLVideoElement>(null);
-    const [streamAvailable, setStreamAvailable] = useState(false);
+// PROPER SCREEN SHARE COMPONENT based on VideoSDK docs
+function PresenterView({ presenterId }: PresenterViewProps): JSX.Element {
+    const { screenShareStream, screenShareOn, isLocal, displayName, screenShareAudioStream } = useParticipant(presenterId);
+    const audioRef = useRef<HTMLAudioElement>(null);
 
-    console.log("🔥 EMERGENCY ScreenShare - ID:", participantId);
-    console.log("🔥 EMERGENCY ScreenShare - screenShareOn:", screenShareOn);
-    console.log("🔥 EMERGENCY ScreenShare - stream:", screenShareStream);
+    console.log("📺 PresenterView - presenterId:", presenterId);
+    console.log("📺 PresenterView - screenShareOn:", screenShareOn);
+    console.log("📺 PresenterView - screenShareStream:", screenShareStream);
 
+    // Handle screen share audio (as per VideoSDK docs)
     useEffect(() => {
-        if (screenShareStream && screenShareStream.track && videoRef.current) {
-            console.log("🔥 EMERGENCY: Setting up screen share manually");
-            try {
-                const mediaStream = new MediaStream([screenShareStream.track]);
-                videoRef.current.srcObject = mediaStream;
-                videoRef.current.play()
-                    .then(() => {
-                        console.log("🔥 EMERGENCY: Screen share video playing successfully");
-                        setStreamAvailable(true);
-                    })
-                    .catch((error) => {
-                        console.error("🔥 EMERGENCY: Screen share video play failed:", error);
-                    });
-            } catch (error) {
-                console.error("🔥 EMERGENCY: Failed to set up screen share:", error);
-            }
+        if (!isLocal && audioRef.current && screenShareOn && screenShareAudioStream) {
+            const mediaStream = new MediaStream();
+            mediaStream.addTrack(screenShareAudioStream.track);
+            audioRef.current.srcObject = mediaStream;
+            audioRef.current.play().catch((err) => {
+                if (err.message.includes("user didn't interact with the document first")) {
+                    console.error("Screen share audio: " + err.message);
+                }
+            });
+        } else if (audioRef.current) {
+            audioRef.current.srcObject = null;
         }
-    }, [screenShareStream]);
+    }, [screenShareAudioStream, screenShareOn, isLocal]);
+
+    if (!screenShareOn || !screenShareStream) {
+        return (
+            <Card className="relative overflow-hidden bg-gray-900 border-2 border-yellow-500 shadow-xl">
+                <CardContent className="p-0 aspect-video relative flex items-center justify-center">
+                    <div className="text-center text-white">
+                        <Monitor className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                        <h3 className="text-lg font-semibold mb-2">Screen Share Loading...</h3>
+                        <p className="text-sm opacity-75">Waiting for {displayName}'s screen</p>
+                    </div>
+                </CardContent>
+            </Card>
+        );
+    }
 
     return (
-        <Card className="relative overflow-hidden bg-gray-900 border-4 border-green-500 shadow-xl">
-            <CardContent className="p-0 aspect-video relative">
-                {/* EMERGENCY: Force video element display */}
-                <video
-                    ref={videoRef}
+        <Card className="relative overflow-hidden bg-gray-900 border-2 border-green-500 shadow-xl">
+            <CardContent className="p-0 relative" style={{ minHeight: '400px' }}>
+                {/* PROPER VideoSDK VideoPlayer for screen share */}
+                <VideoPlayer
+                    participantId={presenterId}
+                    containerStyle={{
+                        height: "100%",
+                        width: "100%",
+                        minHeight: "400px",
+                    }}
                     className="w-full h-full object-contain bg-black"
-                    autoPlay
-                    playsInline
-                    muted
-                    style={{ minHeight: '400px' }}
-                    onLoadedData={() => {
-                        console.log("🔥 EMERGENCY: Video data loaded");
-                        setStreamAvailable(true);
-                    }}
-                    onError={(e) => {
-                        console.error("🔥 EMERGENCY: Video error:", e);
-                    }}
                 />
 
-                {/* Fallback if video doesn't work */}
-                {!streamAvailable && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-red-900/50 text-white">
-                        <div className="text-center">
-                            <Monitor className="w-16 h-16 mx-auto mb-4" />
-                            <h3 className="text-xl font-bold mb-2">EMERGENCY SCREEN SHARE</h3>
-                            <p>Participant: {displayName}</p>
-                            <p>Stream: {screenShareStream ? 'Available' : 'Missing'}</p>
-                            <p>Track: {screenShareStream?.track ? 'Available' : 'Missing'}</p>
-                        </div>
-                    </div>
-                )}
-
-                {/* Emergency overlay */}
-                <div className="absolute top-3 left-3 z-20">
-                    <Badge className="bg-green-600 text-white flex items-center gap-2">
-                        <Monitor className="w-3 h-3" />
-                        🔥 EMERGENCY: {displayName} sharing screen
+                {/* Screen share overlay */}
+                <div className="absolute top-4 left-4 z-10">
+                    <Badge className="bg-green-600 text-white flex items-center gap-2 px-3 py-1">
+                        <Monitor className="w-4 h-4" />
+                        {displayName} is sharing screen
                     </Badge>
                 </div>
 
-                {/* Debug info */}
-                <div className="absolute bottom-3 right-3 z-20 bg-green-900/80 text-green-100 text-xs p-2 rounded">
-                    <div>🔥 EMERGENCY MODE</div>
-                    <div>Stream: {screenShareStream ? '✓' : '✗'}</div>
-                    <div>Track: {screenShareStream?.track ? '✓' : '✗'}</div>
-                    <div>Playing: {streamAvailable ? '✓' : '✗'}</div>
+                {/* Screen share controls overlay */}
+                <div className="absolute top-4 right-4 z-10">
+                    <Badge variant="outline" className="bg-black/50 text-white border-white/20 flex items-center gap-2">
+                        <Maximize2 className="w-3 h-3" />
+                        Screen Share Active
+                    </Badge>
                 </div>
+
+                {/* Audio element for screen share audio */}
+                <audio
+                    ref={audioRef}
+                    autoPlay
+                    playsInline
+                    controls={false}
+                />
             </CardContent>
         </Card>
     );
 }
 
 // Enhanced Participant View Component
-function ParticipantView({ participantId, isPresenting = false }: ParticipantViewProps): JSX.Element {
+function ParticipantView({ participantId }: ParticipantViewProps): JSX.Element {
     const micRef = useRef<HTMLAudioElement>(null);
     const [mediaError, setMediaError] = useState(false);
 
@@ -741,23 +743,26 @@ function ParticipantView({ participantId, isPresenting = false }: ParticipantVie
         screenShareOn
     } = useParticipant(participantId);
 
-    // Audio handling
+    // Enhanced audio handling
     useEffect(() => {
         if (micRef.current && micOn && micStream) {
             try {
                 const mediaStream = new MediaStream();
                 mediaStream.addTrack(micStream.track);
                 micRef.current.srcObject = mediaStream;
-                micRef.current.play().catch(console.error);
+                micRef.current.play().catch((error: Error) => {
+                    console.error("Audio play failed:", error);
+                });
             } catch (error) {
-                console.error("Audio setup failed:", error);
+                console.error("Failed to set up audio stream:", error);
             }
+        } else if (micRef.current) {
+            micRef.current.srcObject = null;
         }
     }, [micStream, micOn]);
 
     return (
-        <Card className={`relative overflow-hidden bg-gray-900 border-0 shadow-lg ${isPresenting ? 'order-first col-span-full lg:col-span-2 xl:col-span-3' : ''
-            }`}>
+        <Card className="relative overflow-hidden bg-gray-900 border-0 shadow-lg">
             <CardContent className="p-0 aspect-video relative">
                 {webcamOn && webcamStream ? (
                     <VideoPlayer
@@ -772,44 +777,35 @@ function ParticipantView({ participantId, isPresenting = false }: ParticipantVie
                 ) : (
                     <div className="w-full h-full bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center">
                         <div className="text-center">
-                            <Avatar className="w-20 h-20 mx-auto mb-3">
-                                <AvatarFallback className="text-2xl bg-gradient-to-r from-blue-600 to-purple-600 text-white">
+                            <Avatar className="w-16 h-16 mx-auto mb-3">
+                                <AvatarFallback className="text-xl bg-gradient-to-r from-blue-600 to-purple-600 text-white">
                                     {displayName?.charAt(0)?.toUpperCase() || "P"}
                                 </AvatarFallback>
                             </Avatar>
                             <p className="text-white text-sm opacity-75">{displayName}</p>
+                            {mediaError && (
+                                <p className="text-red-400 text-xs mt-1">Media Error</p>
+                            )}
                         </div>
                     </div>
                 )}
 
                 {/* Participant info overlay */}
-                <div className="absolute bottom-3 left-3 flex items-center gap-2 z-10">
+                <div className="absolute bottom-2 left-2 flex items-center gap-2 z-10">
                     <Badge
                         variant={isLocal ? "default" : "secondary"}
-                        className={`text-xs ${isLocal ? 'bg-blue-600' : 'bg-black/50 text-white border-white/20'}`}
+                        className={`text-xs ${isLocal ? 'bg-blue-600' : 'bg-black/70 text-white border-white/20'}`}
                     >
                         {displayName} {isLocal && "(You)"}
                         {screenShareOn && <Monitor className="w-3 h-3 ml-1" />}
                     </Badge>
                     <div className="flex gap-1">
-                        {micOn ? (
-                            <div className="bg-green-500 rounded-full p-1">
-                                <Mic className="w-3 h-3 text-white" />
-                            </div>
-                        ) : (
-                            <div className="bg-red-500 rounded-full p-1">
-                                <MicOff className="w-3 h-3 text-white" />
-                            </div>
-                        )}
-                        {webcamOn ? (
-                            <div className="bg-green-500 rounded-full p-1">
-                                <Video className="w-3 h-3 text-white" />
-                            </div>
-                        ) : (
-                            <div className="bg-red-500 rounded-full p-1">
-                                <VideoOff className="w-3 h-3 text-white" />
-                            </div>
-                        )}
+                        <div className={`rounded-full p-1 ${micOn ? 'bg-green-500' : 'bg-red-500'}`}>
+                            {micOn ? <Mic className="w-3 h-3 text-white" /> : <MicOff className="w-3 h-3 text-white" />}
+                        </div>
+                        <div className={`rounded-full p-1 ${webcamOn ? 'bg-green-500' : 'bg-red-500'}`}>
+                            {webcamOn ? <Video className="w-3 h-3 text-white" /> : <VideoOff className="w-3 h-3 text-white" />}
+                        </div>
                     </div>
                 </div>
 
@@ -827,10 +823,11 @@ function Controls(): JSX.Element {
         toggleWebcam,
         enableScreenShare,
         disableScreenShare,
+        toggleScreenShare,
         localMicOn,
         localWebcamOn,
         localScreenShareOn,
-        participants
+        presenterId
     } = useMeeting();
 
     const [isToggling, setIsToggling] = useState<{
@@ -850,7 +847,8 @@ function Controls(): JSX.Element {
             await toggleMic();
             toast.success(localMicOn ? "Microphone muted" : "Microphone unmuted");
         } catch (error) {
-            toast.error("Failed to toggle microphone.");
+            console.error("Failed to toggle microphone:", error);
+            toast.error("Failed to toggle microphone");
         } finally {
             setIsToggling(prev => ({ ...prev, mic: false }));
         }
@@ -863,7 +861,8 @@ function Controls(): JSX.Element {
             await toggleWebcam();
             toast.success(localWebcamOn ? "Camera turned off" : "Camera turned on");
         } catch (error) {
-            toast.error("Failed to toggle camera.");
+            console.error("Failed to toggle camera:", error);
+            toast.error("Failed to toggle camera");
         } finally {
             setIsToggling(prev => ({ ...prev, webcam: false }));
         }
@@ -871,22 +870,24 @@ function Controls(): JSX.Element {
 
     const handleScreenShare = useCallback(async (): Promise<void> => {
         if (isToggling.screen) return;
+
+        // Check if someone else is already presenting
+        if (!localScreenShareOn && presenterId) {
+            toast.error("Someone else is already sharing their screen");
+            return;
+        }
+
         setIsToggling(prev => ({ ...prev, screen: true }));
         try {
-            if (localScreenShareOn) {
-                await disableScreenShare();
-                toast.info("Screen sharing stopped");
-            } else {
-                await enableScreenShare();
-                toast.success("🔥 EMERGENCY: Screen sharing started - check layout!");
-            }
+            await toggleScreenShare();
+            toast.success(localScreenShareOn ? "Screen sharing stopped" : "Screen sharing started");
         } catch (error) {
-            console.error("Screen share error:", error);
-            toast.error("Failed to toggle screen sharing.");
+            console.error("Failed to toggle screen share:", error);
+            toast.error("Failed to toggle screen sharing");
         } finally {
             setIsToggling(prev => ({ ...prev, screen: false }));
         }
-    }, [localScreenShareOn, disableScreenShare, enableScreenShare, isToggling.screen]);
+    }, [toggleScreenShare, localScreenShareOn, presenterId, isToggling.screen]);
 
     const handleLeave = useCallback((): void => {
         if (window.confirm("Are you sure you want to leave the meeting?")) {
@@ -895,21 +896,22 @@ function Controls(): JSX.Element {
     }, [leave]);
 
     return (
-        <div className="bg-white/90 backdrop-blur-sm border-t border-gray-200 p-4">
-            <div className="flex items-center justify-center gap-3">
+        <div className="bg-white/95 backdrop-blur-sm border-t border-gray-200 p-4 shadow-lg">
+            <div className="flex items-center justify-center gap-4">
                 <Button
                     onClick={handleMicToggle}
                     variant={localMicOn ? "default" : "destructive"}
                     size="icon"
-                    className="rounded-full w-12 h-12 transition-all hover:scale-105"
+                    className="rounded-full w-14 h-14 transition-all hover:scale-110 shadow-lg"
                     disabled={isToggling.mic}
+                    title={localMicOn ? "Mute microphone" : "Unmute microphone"}
                 >
                     {isToggling.mic ? (
-                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+                        <div className="animate-spin rounded-full h-6 w-6 border-2 border-white border-t-transparent" />
                     ) : localMicOn ? (
-                        <Mic className="w-5 h-5" />
+                        <Mic className="w-6 h-6" />
                     ) : (
-                        <MicOff className="w-5 h-5" />
+                        <MicOff className="w-6 h-6" />
                     )}
                 </Button>
 
@@ -917,15 +919,16 @@ function Controls(): JSX.Element {
                     onClick={handleWebcamToggle}
                     variant={localWebcamOn ? "default" : "destructive"}
                     size="icon"
-                    className="rounded-full w-12 h-12 transition-all hover:scale-105"
+                    className="rounded-full w-14 h-14 transition-all hover:scale-110 shadow-lg"
                     disabled={isToggling.webcam}
+                    title={localWebcamOn ? "Turn off camera" : "Turn on camera"}
                 >
                     {isToggling.webcam ? (
-                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+                        <div className="animate-spin rounded-full h-6 w-6 border-2 border-white border-t-transparent" />
                     ) : localWebcamOn ? (
-                        <Video className="w-5 h-5" />
+                        <Video className="w-6 h-6" />
                     ) : (
-                        <VideoOff className="w-5 h-5" />
+                        <VideoOff className="w-6 h-6" />
                     )}
                 </Button>
 
@@ -933,15 +936,22 @@ function Controls(): JSX.Element {
                     onClick={handleScreenShare}
                     variant={localScreenShareOn ? "destructive" : "outline"}
                     size="icon"
-                    className="rounded-full w-12 h-12 transition-all hover:scale-105"
-                    disabled={isToggling.screen}
+                    className="rounded-full w-14 h-14 transition-all hover:scale-110 shadow-lg"
+                    disabled={isToggling.screen || (!localScreenShareOn && !!presenterId)}
+                    title={
+                        presenterId && !localScreenShareOn
+                            ? "Someone else is sharing their screen"
+                            : localScreenShareOn
+                                ? "Stop screen sharing"
+                                : "Start screen sharing"
+                    }
                 >
                     {isToggling.screen ? (
-                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-current border-t-transparent" />
+                        <div className="animate-spin rounded-full h-6 w-6 border-2 border-current border-t-transparent" />
                     ) : localScreenShareOn ? (
-                        <MonitorOff className="w-5 h-5" />
+                        <MonitorOff className="w-6 h-6" />
                     ) : (
-                        <Monitor className="w-5 h-5" />
+                        <Monitor className="w-6 h-6" />
                     )}
                 </Button>
 
@@ -949,18 +959,25 @@ function Controls(): JSX.Element {
                     onClick={handleLeave}
                     variant="destructive"
                     size="icon"
-                    className="rounded-full w-12 h-12 transition-all hover:scale-105"
+                    className="rounded-full w-14 h-14 transition-all hover:scale-110 shadow-lg"
+                    title="Leave meeting"
                 >
-                    <PhoneOff className="w-5 h-5" />
+                    <PhoneOff className="w-6 h-6" />
                 </Button>
             </div>
 
-            {/* Status indicators */}
-            <div className="flex justify-center mt-2 gap-2 text-xs text-gray-600">
+            {/* Enhanced status indicators */}
+            <div className="flex justify-center mt-3 gap-3 text-sm">
                 {localScreenShareOn && (
-                    <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                        <Monitor className="w-3 h-3 mr-1" />
-                        🔥 EMERGENCY: You are sharing your screen
+                    <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 px-3 py-1">
+                        <Monitor className="w-4 h-4 mr-2" />
+                        You are sharing your screen
+                    </Badge>
+                )}
+                {presenterId && !localScreenShareOn && (
+                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 px-3 py-1">
+                        <Monitor className="w-4 h-4 mr-2" />
+                        Screen share in progress
                     </Badge>
                 )}
             </div>
@@ -968,13 +985,24 @@ function Controls(): JSX.Element {
     );
 }
 
-// EMERGENCY MEETING VIEW - Forces screen share layout
+// PROPER Meeting View Implementation with presenterId
 function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps): JSX.Element {
     const [joined, setJoined] = useState<string | null>(null);
     const [participantCount, setParticipantCount] = useState<number>(0);
-    const [forceScreenShareLayout, setForceScreenShareLayout] = useState(false);
 
-    const { join, participants, localParticipant } = useMeeting({
+    // CRITICAL: Proper onPresenterChanged callback as per VideoSDK docs
+    const onPresenterChanged = useCallback((presenterId: string | null) => {
+        console.log("📺 onPresenterChanged callback:", presenterId);
+        if (presenterId) {
+            console.log(`📺 ${presenterId} started screen share`);
+            toast.success("Screen sharing started");
+        } else {
+            console.log("📺 Someone stopped screen share");
+            toast.info("Screen sharing stopped");
+        }
+    }, []);
+
+    const { join, participants, localParticipant, presenterId } = useMeeting({
         onMeetingJoined: () => {
             setJoined("JOINED");
             toast.success("Successfully joined the meeting!");
@@ -984,23 +1012,19 @@ function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps):
             toast.info("Left the meeting");
         },
         onParticipantJoined: (participant: any) => {
-            console.log("🔥 EMERGENCY: Participant joined:", participant);
+            console.log("📺 Participant joined:", participant);
             toast.success(`${participant.displayName} joined the meeting`);
             setParticipantCount(prev => prev + 1);
         },
         onParticipantLeft: (participant: any) => {
+            console.log("📺 Participant left:", participant);
             toast.info(`${participant.displayName} left the meeting`);
             setParticipantCount(prev => Math.max(0, prev - 1));
         },
-        onScreenShareStarted: () => {
-            console.log("🔥 EMERGENCY: Screen sharing started event");
-            setForceScreenShareLayout(true);
-            toast.success("🔥 EMERGENCY: Screen share detected - switching layout!");
-        },
-        onScreenShareStopped: () => {
-            console.log("🔥 EMERGENCY: Screen sharing stopped event");
-            setForceScreenShareLayout(false);
-            toast.info("Screen sharing stopped");
+        onPresenterChanged, // CRITICAL: Proper presenter callback
+        onError: (error: any) => {
+            console.error("Meeting error:", error);
+            toast.error("Meeting error occurred");
         },
     });
 
@@ -1017,133 +1041,66 @@ function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps):
     const participantIds = useMemo<string[]>(() => {
         const ids = [...participants.keys()];
         setParticipantCount(ids.length);
-        console.log("🔥 EMERGENCY: Current participants:", ids);
-
-        // Check each participant for screen sharing
-        ids.forEach(id => {
-            const participant = participants.get(id);
-            console.log(`🔥 EMERGENCY: ${id} (${participant?.displayName}) - screenShare:`, participant?.screenShareOn);
-            if (participant?.screenShareOn) {
-                setForceScreenShareLayout(true);
-            }
-        });
-
+        console.log("📺 Current participants:", ids);
+        console.log("📺 Current presenterId:", presenterId);
         return ids;
-    }, [participants]);
-
-    // EMERGENCY: Force detect screen sharing participants
-    const screenSharingParticipants = useMemo(() => {
-        const sharingParticipants = participantIds.filter(id => {
-            const participant = participants.get(id);
-            const isSharing = participant?.screenShareOn;
-            console.log(`🔥 EMERGENCY: Checking ${id} for screen share:`, isSharing);
-            return isSharing;
-        });
-
-        console.log("🔥 EMERGENCY: Found screen sharing participants:", sharingParticipants);
-
-        // If browser shows screen sharing but we can't detect it, force it
-        if (sharingParticipants.length === 0 && typeof window !== 'undefined') {
-            // Check if browser is showing screen share notification
-            const hasScreenShareNotification = document.querySelector('[data-testid="screen-share-notification"]') ||
-                document.body.innerText.includes('sharing your screen') ||
-                document.body.innerText.includes('Stop sharing');
-
-            if (hasScreenShareNotification || forceScreenShareLayout) {
-                console.log("🔥 EMERGENCY: Browser shows screen sharing but VideoSDK doesn't detect it - forcing layout");
-                // Force add the local participant as screen sharing
-                return participantIds.slice(0, 1); // Just use first participant
-            }
-        }
-
-        return sharingParticipants;
-    }, [participantIds, participants, forceScreenShareLayout]);
-
-    // EMERGENCY: Debug button to force screen share layout
-    const debugForceScreenShare = useCallback(() => {
-        console.log("🔥 EMERGENCY: Force enabling screen share layout");
-        setForceScreenShareLayout(!forceScreenShareLayout);
-        toast.info(`🔥 EMERGENCY: Force screen share layout ${!forceScreenShareLayout ? 'ON' : 'OFF'}`);
-    }, [forceScreenShareLayout]);
+    }, [participants, presenterId]);
 
     if (joined === "JOINED") {
-        const shouldShowScreenShare = screenSharingParticipants.length > 0 || forceScreenShareLayout;
-
         return (
             <div className="h-screen flex flex-col bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
-                {/* Header */}
-                <div className="bg-white/90 backdrop-blur-sm border-b border-gray-200 p-4 shadow-sm">
+                {/* Enhanced Header */}
+                <div className="bg-white/95 backdrop-blur-sm border-b border-gray-200 p-4 shadow-sm">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-4">
-                            <div className="flex items-center gap-2">
-                                <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center">
-                                    <Video className="w-4 h-4 text-white" />
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center">
+                                    <Video className="w-5 h-5 text-white" />
                                 </div>
-                                <h1 className="text-xl font-semibold text-gray-900">🔥 EMERGENCY Video Meeting</h1>
+                                <div>
+                                    <h1 className="text-xl font-semibold text-gray-900">Video Meeting</h1>
+                                    <p className="text-sm text-gray-500">Meeting ID: {meetingId.slice(0, 8)}...</p>
+                                </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                                <Badge variant="outline" className="flex items-center gap-2 bg-white/80">
+                            <div className="flex items-center gap-3">
+                                <Badge variant="outline" className="flex items-center gap-2 bg-white/80 px-3 py-1">
                                     <Users className="w-4 h-4" />
                                     {participantCount} participant{participantCount !== 1 ? 's' : ''}
                                 </Badge>
-                                {shouldShowScreenShare && (
-                                    <Badge variant="outline" className="flex items-center gap-2 bg-green-50 text-green-700 border-green-200">
+                                {presenterId && (
+                                    <Badge variant="outline" className="flex items-center gap-2 bg-green-50 text-green-700 border-green-200 px-3 py-1">
                                         <Monitor className="w-4 h-4" />
-                                        🔥 EMERGENCY: Screen sharing detected
+                                        Screen sharing active
                                     </Badge>
                                 )}
                             </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                            {/* EMERGENCY DEBUG BUTTON */}
-                            <Button
-                                onClick={debugForceScreenShare}
-                                variant="outline"
-                                size="sm"
-                                className="bg-red-50 text-red-700 border-red-200"
-                            >
-                                🔥 Force Layout
-                            </Button>
-                            <Button
-                                onClick={copyMeetingId}
-                                variant="outline"
-                                size="sm"
-                                className="flex items-center gap-2 bg-white/80 hover:bg-white"
-                            >
-                                <Copy className="w-4 h-4" />
-                                ID: {meetingId.slice(0, 8)}...
-                            </Button>
-                        </div>
+                        <Button
+                            onClick={copyMeetingId}
+                            variant="outline"
+                            size="sm"
+                            className="flex items-center gap-2 bg-white/80 hover:bg-white"
+                        >
+                            <Copy className="w-4 h-4" />
+                            Copy Meeting ID
+                        </Button>
                     </div>
                 </div>
 
-                {/* Video Grid */}
+                {/* Enhanced Video Grid */}
                 <div className="flex-1 p-6 overflow-auto">
-                    {shouldShowScreenShare ? (
-                        /* EMERGENCY SCREEN SHARING LAYOUT */
+                    {presenterId ? (
+                        /* PROPER SCREEN SHARING LAYOUT - Based on VideoSDK docs */
                         <div className="h-full flex flex-col gap-4">
-                            <div className="bg-green-100 p-2 rounded text-center text-green-800 font-semibold">
-                                🔥 EMERGENCY: Screen Share Layout Active
-                            </div>
-
-                            {/* Screen share view */}
+                            {/* Screen share view - CRITICAL: Use presenterId from useMeeting hook */}
                             <div className="flex-1 min-h-[400px]">
-                                {screenSharingParticipants.length > 0 ? (
-                                    screenSharingParticipants.map((participantId: string) => (
-                                        <ForceScreenShareView key={`emergency-screen-${participantId}`} participantId={participantId} />
-                                    ))
-                                ) : (
-                                    // Fallback: Show first participant as screen sharing
-                                    participantIds.slice(0, 1).map((participantId: string) => (
-                                        <ForceScreenShareView key={`emergency-fallback-${participantId}`} participantId={participantId} />
-                                    ))
-                                )}
+                                <PresenterView presenterId={presenterId} />
                             </div>
 
                             {/* Participant thumbnails */}
-                            <div className="h-32 flex gap-2 overflow-x-auto">
+                            <div className="h-36 flex gap-3 overflow-x-auto py-2">
                                 {participantIds.map((participantId: string) => (
-                                    <div key={participantId} className="min-w-[200px] h-full">
+                                    <div key={participantId} className="min-w-[240px] h-full">
                                         <ParticipantView participantId={participantId} />
                                     </div>
                                 ))}
@@ -1151,10 +1108,11 @@ function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps):
                         </div>
                     ) : (
                         /* Normal grid layout */
-                        <div className={`grid gap-4 h-full ${participantIds.length === 1 ? 'grid-cols-1 max-w-3xl mx-auto' :
+                        <div className={`grid gap-4 h-full ${participantIds.length === 1 ? 'grid-cols-1 max-w-4xl mx-auto' :
                             participantIds.length === 2 ? 'grid-cols-1 lg:grid-cols-2 max-w-6xl mx-auto' :
                                 participantIds.length <= 4 ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-2 max-w-6xl mx-auto' :
-                                    'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 max-w-full mx-auto'
+                                    participantIds.length <= 6 ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 max-w-7xl mx-auto' :
+                                        'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 max-w-full mx-auto'
                             }`}>
                             {participantIds.map((participantId: string) => (
                                 <ParticipantView
@@ -1166,7 +1124,7 @@ function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps):
                     )}
                 </div>
 
-                {/* Controls */}
+                {/* Enhanced Controls */}
                 <Controls />
             </div>
         );
@@ -1175,7 +1133,7 @@ function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps):
     if (joined === "JOINING") {
         return (
             <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center">
-                <Card className="w-full max-w-md shadow-xl border-0 bg-white/80 backdrop-blur-sm">
+                <Card className="w-full max-w-md shadow-xl border-0 bg-white/90 backdrop-blur-sm">
                     <CardContent className="p-8 text-center">
                         <div className="relative mx-auto mb-6">
                             <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-200 border-t-blue-600 mx-auto"></div>
@@ -1183,8 +1141,11 @@ function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps):
                                 <Video className="w-6 h-6 text-blue-600" />
                             </div>
                         </div>
-                        <h2 className="text-xl font-semibold text-gray-900 mb-2">🔥 EMERGENCY: Joining Meeting...</h2>
+                        <h2 className="text-xl font-semibold text-gray-900 mb-2">Joining Meeting...</h2>
                         <p className="text-gray-600">Please wait while we connect you to the meeting.</p>
+                        <div className="mt-4 text-sm text-gray-500">
+                            Meeting ID: {meetingId}
+                        </div>
                     </CardContent>
                 </Card>
             </div>
@@ -1193,7 +1154,7 @@ function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps):
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center p-4">
-            <Card className="w-full max-w-md shadow-xl border-0 bg-white/80 backdrop-blur-sm">
+            <Card className="w-full max-w-md shadow-xl border-0 bg-white/90 backdrop-blur-sm">
                 <CardHeader className="text-center">
                     <div className="mx-auto w-16 h-16 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center mb-4">
                         <Video className="w-8 h-8 text-white" />
@@ -1227,7 +1188,7 @@ export default function VideoSDKComponents({
 }: VideoSDKComponentsProps): JSX.Element {
     const meetingConfig: MeetingConfig = {
         meetingId,
-        micEnabled: false,
+        micEnabled: false, // Start with media disabled to avoid conflicts
         webcamEnabled: false,
         name: userName,
     };
