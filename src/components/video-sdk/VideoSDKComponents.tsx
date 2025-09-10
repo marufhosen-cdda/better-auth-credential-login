@@ -602,6 +602,7 @@
 
 // app/video-meeting/VideoSDKComponents.tsx (EMERGENCY SCREEN SHARE FIX)
 // app/video-meeting/VideoSDKComponents.tsx (PROPER SCREEN SHARE IMPLEMENTATION)
+// app/video-meeting/VideoSDKComponents.tsx (FINAL SCREEN SHARE FIX)
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useCallback, JSX } from "react";
@@ -615,7 +616,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Mic, MicOff, Video, VideoOff, Phone, PhoneOff, Monitor, MonitorOff, Copy, Users, Settings2, Maximize2 } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, Phone, PhoneOff, Monitor, MonitorOff, Copy, Users, RefreshCw, Play } from "lucide-react";
 import { toast } from "sonner";
 
 // Types
@@ -647,39 +648,128 @@ interface MeetingConfig {
     name: string;
 }
 
-// PROPER SCREEN SHARE COMPONENT based on VideoSDK docs
+// FINAL SCREEN SHARE COMPONENT - Multiple fallback methods
 function PresenterView({ presenterId }: PresenterViewProps): JSX.Element {
     const { screenShareStream, screenShareOn, isLocal, displayName, screenShareAudioStream } = useParticipant(presenterId);
+    const videoRef = useRef<HTMLVideoElement>(null);
     const audioRef = useRef<HTMLAudioElement>(null);
+    const [streamMethod, setStreamMethod] = useState<'videoplayer' | 'manual' | 'fallback'>('videoplayer');
+    const [isVideoPlaying, setIsVideoPlaying] = useState(false);
+    const [retryCount, setRetryCount] = useState(0);
 
-    console.log("📺 PresenterView - presenterId:", presenterId);
-    console.log("📺 PresenterView - screenShareOn:", screenShareOn);
-    console.log("📺 PresenterView - screenShareStream:", screenShareStream);
+    console.log("🎥 PresenterView - presenterId:", presenterId);
+    console.log("🎥 PresenterView - screenShareOn:", screenShareOn);
+    console.log("🎥 PresenterView - screenShareStream:", screenShareStream);
+    console.log("🎥 PresenterView - stream track:", screenShareStream?.track);
 
-    // Handle screen share audio (as per VideoSDK docs)
+    // Handle screen share audio
     useEffect(() => {
         if (!isLocal && audioRef.current && screenShareOn && screenShareAudioStream) {
-            const mediaStream = new MediaStream();
-            mediaStream.addTrack(screenShareAudioStream.track);
-            audioRef.current.srcObject = mediaStream;
-            audioRef.current.play().catch((err) => {
-                if (err.message.includes("user didn't interact with the document first")) {
-                    console.error("Screen share audio: " + err.message);
-                }
-            });
+            try {
+                const mediaStream = new MediaStream();
+                mediaStream.addTrack(screenShareAudioStream.track);
+                audioRef.current.srcObject = mediaStream;
+                audioRef.current.play().catch(console.error);
+            } catch (error) {
+                console.error("Screen share audio error:", error);
+            }
         } else if (audioRef.current) {
             audioRef.current.srcObject = null;
         }
     }, [screenShareAudioStream, screenShareOn, isLocal]);
 
-    if (!screenShareOn || !screenShareStream) {
+    // CRITICAL: Manual video stream handling for screen share
+    useEffect(() => {
+        if (streamMethod === 'manual' && videoRef.current && screenShareStream?.track) {
+            try {
+                console.log("🎥 Setting up manual video stream");
+                const mediaStream = new MediaStream([screenShareStream.track]);
+                videoRef.current.srcObject = mediaStream;
+
+                // Force play with multiple attempts
+                const playVideo = async () => {
+                    try {
+                        await videoRef.current!.play();
+                        setIsVideoPlaying(true);
+                        console.log("🎥 Manual video playing successfully");
+                    } catch (error) {
+                        console.error("🎥 Manual video play failed:", error);
+                        if (retryCount < 3) {
+                            setTimeout(() => {
+                                setRetryCount(prev => prev + 1);
+                                playVideo();
+                            }, 1000);
+                        } else {
+                            setStreamMethod('fallback');
+                        }
+                    }
+                };
+
+                playVideo();
+            } catch (error) {
+                console.error("🎥 Manual stream setup failed:", error);
+                setStreamMethod('fallback');
+            }
+        }
+    }, [streamMethod, screenShareStream, retryCount]);
+
+    // Auto-switch to manual if VideoPlayer fails
+    useEffect(() => {
+        if (streamMethod === 'videoplayer' && screenShareStream?.track) {
+            // Give VideoPlayer 3 seconds to work, then switch to manual
+            const timeout = setTimeout(() => {
+                if (!isVideoPlaying) {
+                    console.log("🎥 VideoPlayer failed, switching to manual");
+                    setStreamMethod('manual');
+                }
+            }, 3000);
+
+            return () => clearTimeout(timeout);
+        }
+    }, [streamMethod, screenShareStream, isVideoPlaying]);
+
+    const forceManualMode = useCallback(() => {
+        console.log("🎥 Force switching to manual mode");
+        setStreamMethod('manual');
+        setRetryCount(0);
+    }, []);
+
+    const forceFallbackMode = useCallback(() => {
+        console.log("🎥 Force switching to fallback mode");
+        setStreamMethod('fallback');
+    }, []);
+
+    if (!screenShareOn) {
         return (
             <Card className="relative overflow-hidden bg-gray-900 border-2 border-yellow-500 shadow-xl">
                 <CardContent className="p-0 aspect-video relative flex items-center justify-center">
                     <div className="text-center text-white">
                         <Monitor className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                        <h3 className="text-lg font-semibold mb-2">Screen Share Loading...</h3>
-                        <p className="text-sm opacity-75">Waiting for {displayName}'s screen</p>
+                        <h3 className="text-lg font-semibold mb-2">Screen Share Stopped</h3>
+                        <p className="text-sm opacity-75">{displayName} stopped sharing</p>
+                    </div>
+                </CardContent>
+            </Card>
+        );
+    }
+
+    if (!screenShareStream?.track) {
+        return (
+            <Card className="relative overflow-hidden bg-gray-900 border-2 border-red-500 shadow-xl">
+                <CardContent className="p-0 aspect-video relative flex items-center justify-center">
+                    <div className="text-center text-white">
+                        <Monitor className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                        <h3 className="text-lg font-semibold mb-2">No Screen Share Stream</h3>
+                        <p className="text-sm opacity-75">Waiting for {displayName}'s screen...</p>
+                        <Button
+                            onClick={() => window.location.reload()}
+                            variant="outline"
+                            size="sm"
+                            className="mt-4"
+                        >
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            Refresh
+                        </Button>
                     </div>
                 </CardContent>
             </Card>
@@ -689,30 +779,134 @@ function PresenterView({ presenterId }: PresenterViewProps): JSX.Element {
     return (
         <Card className="relative overflow-hidden bg-gray-900 border-2 border-green-500 shadow-xl">
             <CardContent className="p-0 relative" style={{ minHeight: '400px' }}>
-                {/* PROPER VideoSDK VideoPlayer for screen share */}
-                <VideoPlayer
-                    participantId={presenterId}
-                    containerStyle={{
-                        height: "100%",
-                        width: "100%",
-                        minHeight: "400px",
-                    }}
-                    className="w-full h-full object-contain bg-black"
-                />
 
-                {/* Screen share overlay */}
-                <div className="absolute top-4 left-4 z-10">
+                {/* Method 1: VideoSDK VideoPlayer */}
+                {streamMethod === 'videoplayer' && (
+                    <div className="relative w-full h-full">
+                        <VideoPlayer
+                            participantId={presenterId}
+                            containerStyle={{
+                                height: "100%",
+                                width: "100%",
+                                minHeight: "400px",
+                            }}
+                            className="w-full h-full object-contain bg-black"
+                            onPlay={() => {
+                                console.log("🎥 VideoPlayer started playing");
+                                setIsVideoPlaying(true);
+                            }}
+                            onError={(error: any) => {
+                                console.error("🎥 VideoPlayer error:", error);
+                                setStreamMethod('manual');
+                            }}
+                        />
+
+                        {/* VideoPlayer fallback overlay */}
+                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                            <div className="text-center text-white">
+                                <div className="animate-spin rounded-full h-12 w-12 border-4 border-green-500 border-t-transparent mx-auto mb-4"></div>
+                                <p className="mb-4">Loading screen share...</p>
+                                <Button onClick={forceManualMode} variant="outline" size="sm">
+                                    <Play className="w-4 h-4 mr-2" />
+                                    Force Manual Mode
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Method 2: Manual Video Element */}
+                {streamMethod === 'manual' && (
+                    <div className="relative w-full h-full">
+                        <video
+                            ref={videoRef}
+                            className="w-full h-full object-contain bg-black"
+                            autoPlay
+                            playsInline
+                            muted={false}
+                            controls={false}
+                            style={{ minHeight: '400px' }}
+                            onPlay={() => {
+                                console.log("🎥 Manual video started playing");
+                                setIsVideoPlaying(true);
+                            }}
+                            onLoadedData={() => {
+                                console.log("🎥 Manual video loaded data");
+                                setIsVideoPlaying(true);
+                            }}
+                            onError={(e) => {
+                                console.error("🎥 Manual video error:", e);
+                                setStreamMethod('fallback');
+                            }}
+                            onCanPlay={() => {
+                                console.log("🎥 Manual video can play");
+                                setIsVideoPlaying(true);
+                            }}
+                        />
+
+                        {!isVideoPlaying && (
+                            <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
+                                <div className="text-center text-white">
+                                    <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
+                                    <p className="mb-4">Setting up manual stream... (Attempt {retryCount + 1}/3)</p>
+                                    <Button onClick={forceFallbackMode} variant="outline" size="sm">
+                                        Try Fallback Method
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* Method 3: Fallback - Show stream info */}
+                {streamMethod === 'fallback' && (
+                    <div className="w-full h-full flex items-center justify-center bg-gray-800" style={{ minHeight: '400px' }}>
+                        <div className="text-center text-white max-w-md">
+                            <Monitor className="w-24 h-24 mx-auto mb-6 text-green-500" />
+                            <h3 className="text-xl font-bold mb-4">Screen Share Active</h3>
+                            <p className="text-sm opacity-75 mb-6">
+                                {displayName} is sharing their screen, but there's a display issue.
+                                The content is being shared successfully.
+                            </p>
+                            <div className="space-y-2 text-xs bg-black/30 p-4 rounded">
+                                <p>Stream: {screenShareStream ? '✅ Available' : '❌ Missing'}</p>
+                                <p>Track: {screenShareStream?.track ? '✅ Available' : '❌ Missing'}</p>
+                                <p>Sharing: {screenShareOn ? '✅ Active' : '❌ Inactive'}</p>
+                            </div>
+                            <div className="mt-6 space-x-2">
+                                <Button onClick={() => setStreamMethod('videoplayer')} variant="outline" size="sm">
+                                    Try VideoPlayer
+                                </Button>
+                                <Button onClick={forceManualMode} variant="outline" size="sm">
+                                    Try Manual
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Screen share overlay - Always visible */}
+                <div className="absolute top-4 left-4 z-20">
                     <Badge className="bg-green-600 text-white flex items-center gap-2 px-3 py-1">
                         <Monitor className="w-4 h-4" />
                         {displayName} is sharing screen
                     </Badge>
                 </div>
 
-                {/* Screen share controls overlay */}
-                <div className="absolute top-4 right-4 z-10">
-                    <Badge variant="outline" className="bg-black/50 text-white border-white/20 flex items-center gap-2">
-                        <Maximize2 className="w-3 h-3" />
-                        Screen Share Active
+                {/* Method indicator */}
+                <div className="absolute top-4 right-4 z-20">
+                    <Badge variant="outline" className="bg-black/70 text-white border-white/20 text-xs">
+                        Method: {streamMethod}
+                    </Badge>
+                </div>
+
+                {/* Video status indicator */}
+                <div className="absolute bottom-4 right-4 z-20">
+                    <Badge
+                        variant="outline"
+                        className={`text-xs ${isVideoPlaying ? 'bg-green-900/70 text-green-100 border-green-400' : 'bg-red-900/70 text-red-100 border-red-400'}`}
+                    >
+                        {isVideoPlaying ? '🟢 Playing' : '🔴 Not Playing'}
                     </Badge>
                 </div>
 
@@ -879,15 +1073,20 @@ function Controls(): JSX.Element {
 
         setIsToggling(prev => ({ ...prev, screen: true }));
         try {
-            await toggleScreenShare();
-            toast.success(localScreenShareOn ? "Screen sharing stopped" : "Screen sharing started");
+            if (localScreenShareOn) {
+                await disableScreenShare();
+                toast.success("Screen sharing stopped");
+            } else {
+                await enableScreenShare();
+                toast.success("Screen sharing started - check if content is visible!");
+            }
         } catch (error) {
             console.error("Failed to toggle screen share:", error);
             toast.error("Failed to toggle screen sharing");
         } finally {
             setIsToggling(prev => ({ ...prev, screen: false }));
         }
-    }, [toggleScreenShare, localScreenShareOn, presenterId, isToggling.screen]);
+    }, [enableScreenShare, disableScreenShare, localScreenShareOn, presenterId, isToggling.screen]);
 
     const handleLeave = useCallback((): void => {
         if (window.confirm("Are you sure you want to leave the meeting?")) {
@@ -985,20 +1184,20 @@ function Controls(): JSX.Element {
     );
 }
 
-// PROPER Meeting View Implementation with presenterId
+// PROPER Meeting View Implementation with enhanced presenter detection
 function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps): JSX.Element {
     const [joined, setJoined] = useState<string | null>(null);
     const [participantCount, setParticipantCount] = useState<number>(0);
 
-    // CRITICAL: Proper onPresenterChanged callback as per VideoSDK docs
+    // Enhanced onPresenterChanged callback
     const onPresenterChanged = useCallback((presenterId: string | null) => {
-        console.log("📺 onPresenterChanged callback:", presenterId);
+        console.log("🎥 onPresenterChanged callback:", presenterId);
         if (presenterId) {
-            console.log(`📺 ${presenterId} started screen share`);
-            toast.success("Screen sharing started");
+            console.log(`🎥 ${presenterId} started screen share`);
+            toast.success("Screen sharing started! Layout switched to presentation mode.");
         } else {
-            console.log("📺 Someone stopped screen share");
-            toast.info("Screen sharing stopped");
+            console.log("🎥 Someone stopped screen share");
+            toast.info("Screen sharing stopped. Returning to normal layout.");
         }
     }, []);
 
@@ -1012,16 +1211,16 @@ function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps):
             toast.info("Left the meeting");
         },
         onParticipantJoined: (participant: any) => {
-            console.log("📺 Participant joined:", participant);
+            console.log("🎥 Participant joined:", participant);
             toast.success(`${participant.displayName} joined the meeting`);
             setParticipantCount(prev => prev + 1);
         },
         onParticipantLeft: (participant: any) => {
-            console.log("📺 Participant left:", participant);
+            console.log("🎥 Participant left:", participant);
             toast.info(`${participant.displayName} left the meeting`);
             setParticipantCount(prev => Math.max(0, prev - 1));
         },
-        onPresenterChanged, // CRITICAL: Proper presenter callback
+        onPresenterChanged,
         onError: (error: any) => {
             console.error("Meeting error:", error);
             toast.error("Meeting error occurred");
@@ -1041,8 +1240,8 @@ function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps):
     const participantIds = useMemo<string[]>(() => {
         const ids = [...participants.keys()];
         setParticipantCount(ids.length);
-        console.log("📺 Current participants:", ids);
-        console.log("📺 Current presenterId:", presenterId);
+        console.log("🎥 Current participants:", ids);
+        console.log("🎥 Current presenterId:", presenterId);
         return ids;
     }, [participants, presenterId]);
 
@@ -1059,7 +1258,7 @@ function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps):
                                 </div>
                                 <div>
                                     <h1 className="text-xl font-semibold text-gray-900">Video Meeting</h1>
-                                    <p className="text-sm text-gray-500">Meeting ID: {meetingId.slice(0, 8)}...</p>
+                                    <p className="text-sm text-gray-500">ID: {meetingId.slice(0, 8)}...</p>
                                 </div>
                             </div>
                             <div className="flex items-center gap-3">
@@ -1082,7 +1281,7 @@ function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps):
                             className="flex items-center gap-2 bg-white/80 hover:bg-white"
                         >
                             <Copy className="w-4 h-4" />
-                            Copy Meeting ID
+                            Copy ID
                         </Button>
                     </div>
                 </div>
@@ -1090,9 +1289,9 @@ function MeetingView({ meetingId, onMeetingLeave, userName }: MeetingViewProps):
                 {/* Enhanced Video Grid */}
                 <div className="flex-1 p-6 overflow-auto">
                     {presenterId ? (
-                        /* PROPER SCREEN SHARING LAYOUT - Based on VideoSDK docs */
+                        /* SCREEN SHARING LAYOUT */
                         <div className="h-full flex flex-col gap-4">
-                            {/* Screen share view - CRITICAL: Use presenterId from useMeeting hook */}
+                            {/* Screen share view */}
                             <div className="flex-1 min-h-[400px]">
                                 <PresenterView presenterId={presenterId} />
                             </div>
