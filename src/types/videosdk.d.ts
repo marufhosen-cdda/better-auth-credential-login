@@ -79,6 +79,8 @@ declare module '@videosdk.live/react-sdk' {
         onMicRequested?: (data: any) => void;
         onWebcamRequested?: (data: any) => void;
         onError?: (data: any) => void;
+        onScreenShareStarted?: (participantId: string) => void;
+        onScreenShareStopped?: (participantId: string) => void;
     }
 
     // Participant hook return type
@@ -106,7 +108,7 @@ declare module '@videosdk.live/react-sdk' {
     // VideoPlayer props
     interface VideoPlayerProps {
         participantId: string;
-        type?: 'video' | 'audio';
+        type?: 'video' | 'audio' | 'screenShare';
         containerStyle?: React.CSSProperties;
         videoStyle?: React.CSSProperties;
         className?: string;
