@@ -36,8 +36,33 @@ declare module '@videosdk.live/react-sdk' {
         webcamStream?: MediaStream;
         micStream?: MediaStream;
         screenShareStream?: MediaStream;
+        screenShareAudioStream?: MediaStream;
         screenShareOn?: boolean;
         mode?: string;
+    }
+
+    // PubSub interfaces
+    interface PubSubMessage {
+        id: string;
+        message: string;
+        senderId: string;
+        senderName: string;
+        timestamp: number;
+        topic: string;
+    }
+
+    interface PubSubPublishOptions {
+        persist?: boolean;
+    }
+
+    interface UsePubSubOptions {
+        onMessageReceived?: (message: PubSubMessage) => void;
+        onOldMessagesReceived?: (messages: PubSubMessage[]) => void;
+    }
+
+    interface UsePubSubReturn {
+        publish: (message: string, options?: PubSubPublishOptions) => void;
+        messages: PubSubMessage[];
     }
 
     // Meeting hook return type
@@ -96,12 +121,12 @@ declare module '@videosdk.live/react-sdk' {
         webcamStream?: MediaStream;
         micStream?: MediaStream;
         screenShareStream?: MediaStream;
+        screenShareAudioStream?: MediaStream;
         mode: string;
         enableMic: () => void;
         disableMic: () => void;
         enableWebcam: () => void;
         disableWebcam: () => void;
-        screenShareAudioStream?: MediaStream;
         pin: () => void;
         unpin: () => void;
         setQuality: (quality: string) => void;
@@ -116,6 +141,8 @@ declare module '@videosdk.live/react-sdk' {
         videoStyle?: React.CSSProperties;
         className?: string;
         classNameVideo?: string;
+        onPlay?: () => void;
+        onError?: (error: any) => void;
         [key: string]: any;
     }
 
@@ -141,10 +168,7 @@ declare module '@videosdk.live/react-sdk' {
 
     export function useMeeting(options?: UseMeetingOptions): UseMeetingReturn;
     export function useParticipant(participantId: string): UseParticipantReturn;
-    export function usePubSub(topic: string): {
-        publish: (message: any, options?: any) => void;
-        messages: any[];
-    };
+    export function usePubSub(topic: string, options?: UsePubSubOptions): UsePubSubReturn;
 }
 
 // Global type extensions
